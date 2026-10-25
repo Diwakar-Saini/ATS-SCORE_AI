@@ -1,0 +1,440 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>ATS Score Checker</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: two panes on desktop (inputs left, live report right); single column on phones. */
+:root {
+  --bg: #f3f5f8;
+  --surface: #ffffff;
+  --ink: #14202e;
+  --muted: #5b6878;
+  --line: #d9dfe7;
+  --accent: #1f4fd8;
+  --accent-ink: #ffffff;
+  --good: #11804a;
+  --warn: #b26a00;
+  --bad: #c0352b;
+  --good-bg: #e2f4ea;
+  --warn-bg: #fbeed5;
+  --bad-bg: #fbe4e1;
+  --track: #e6eaf0;
+  --font-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Instrument Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1620; --surface: #172230; --ink: #e8edf3; --muted: #9aa8b8; --line: #2a394b;
+    --accent: #7ea2ff; --accent-ink: #0b1220;
+    --good: #4fd18b; --warn: #f0b34a; --bad: #ff8a7d;
+    --good-bg: #123325; --warn-bg: #3a2c10; --bad-bg: #3d1b18; --track: #26364a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1620; --surface: #172230; --ink: #e8edf3; --muted: #9aa8b8; --line: #2a394b;
+  --accent: #7ea2ff; --accent-ink: #0b1220;
+  --good: #4fd18b; --warn: #f0b34a; --bad: #ff8a7d;
+  --good-bg: #123325; --warn-bg: #3a2c10; --bad-bg: #3d1b18; --track: #26364a;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+  padding-block: 28px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1120px; margin: 0 auto; display: grid; gap: 24px; }
+header h1 { font-family: var(--font-display); font-size: clamp(1.7rem, 4vw, 2.4rem); line-height: 1.1; margin: 0 0 6px; text-wrap: balance; letter-spacing: -0.01em; }
+header p { margin: 0; color: var(--muted); max-width: 60ch; }
+.panes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+@media (max-width: 820px) { .panes { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: grid; gap: 14px; min-width: 0; }
+.label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+label, .eyebrow { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+textarea {
+  width: 100%; min-height: 230px; resize: vertical;
+  background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px;
+  padding: 12px; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.55;
+}
+textarea#jd { min-height: 150px; }
+textarea:focus-visible, button:focus-visible, .file-btn:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btns { display: flex; gap: 8px; flex-wrap: wrap; }
+button, .file-btn {
+  font: 500 13px var(--font-body); color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; cursor: pointer;
+}
+button:hover, .file-btn:hover { border-color: var(--accent); }
+.file-btn input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.file-btn { position: relative; display: inline-flex; }
+.note { font-size: 12.5px; color: var(--muted); margin: 0; }
+.note.err { color: var(--bad); }
+.sample-tag { font-family: var(--font-mono); font-size: 11px; color: var(--warn); background: var(--warn-bg); padding: 2px 8px; border-radius: 99px; }
+
+.score-top { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 18px; align-items: center; }
+.gauge { position: relative; width: 132px; height: 132px; }
+.gauge svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.gauge .num { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+.gauge .num b { font-family: var(--font-display); font-size: 2.5rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.gauge .num span { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.verdict h2 { font-family: var(--font-display); font-size: 1.35rem; margin: 0 0 4px; }
+.verdict p { margin: 0; color: var(--muted); font-size: 14px; }
+.pill { display: inline-block; font-family: var(--font-mono); font-size: 11.5px; padding: 2px 9px; border-radius: 99px; font-weight: 500; }
+.pill.good { background: var(--good-bg); color: var(--good); }
+.pill.warn { background: var(--warn-bg); color: var(--warn); }
+.pill.bad { background: var(--bad-bg); color: var(--bad); }
+
+.cats { display: grid; gap: 12px; }
+.cat-head { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; font-weight: 500; }
+.cat-head span:last-child { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.bar { height: 8px; background: var(--track); border-radius: 99px; overflow: hidden; margin-top: 5px; }
+.bar i { display: block; height: 100%; border-radius: 99px; }
+.bar i.good { background: var(--good); } .bar i.warn { background: var(--warn); } .bar i.bad { background: var(--bad); }
+.cat-detail { font-size: 12.5px; color: var(--muted); margin-top: 4px; }
+
+h3 { font-family: var(--font-display); font-size: 1.05rem; margin: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-family: var(--font-mono); font-size: 12px; padding: 3px 9px; border-radius: 6px; border: 1px solid transparent; }
+.chip.hit { background: var(--good-bg); color: var(--good); }
+.chip.miss { background: var(--bad-bg); color: var(--bad); }
+.fixes { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.fixes li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; font-size: 14px; }
+.fixes .gain { font-family: var(--font-mono); font-size: 12px; color: var(--accent); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 1px 7px; white-space: nowrap; }
+.empty { color: var(--muted); font-size: 14px; }
+@media (max-width: 420px) { .score-top { grid-template-columns: minmax(0, 1fr); justify-items: start; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+.bar i, .gauge circle.val { transition: width .4s ease, stroke-dasharray .4s ease; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>ATS Score Checker</h1>
+    <p>Paste your resume and the job description. You get a score out of 100, the keywords you are missing, and the fixes that earn the most points. Everything runs in your browser; nothing is uploaded.</p>
+  </header>
+
+  <div class="panes">
+    <section class="panel" aria-label="Inputs">
+      <div class="label-row">
+        <label for="resume">Resume text</label>
+        <span class="sample-tag" id="sampleTag">Sample resume loaded</span>
+      </div>
+      <textarea id="resume" spellcheck="false" aria-describedby="fileNote"></textarea>
+      <div class="btns">
+        <label class="file-btn" for="file" style="text-transform:none;letter-spacing:0;font-family:var(--font-body);font-size:13px;color:var(--ink)">
+          <input type="file" id="file" accept=".txt,.md,.docx,.pdf">Upload PDF, DOCX or TXT
+        </label>
+        <button type="button" id="clear">Clear both</button>
+        <button type="button" id="sample">Load sample</button>
+      </div>
+      <p class="note" id="fileNote">Uploads are read in your browser. If a PDF comes out empty or scrambled, that is also a warning sign for real ATS parsers.</p>
+
+      <label for="jd">Job description <span style="text-transform:none;letter-spacing:0">(optional, adds keyword matching)</span></label>
+      <textarea id="jd" spellcheck="false"></textarea>
+    </section>
+
+    <section class="panel" aria-label="Report" aria-live="polite">
+      <div class="score-top">
+        <div class="gauge">
+          <svg viewBox="0 0 120 120" aria-hidden="true">
+            <circle cx="60" cy="60" r="52" fill="none" stroke="var(--track)" stroke-width="10"></circle>
+            <circle class="val" id="ring" cx="60" cy="60" r="52" fill="none" stroke="var(--good)" stroke-width="10" stroke-linecap="round" stroke-dasharray="0 327"></circle>
+          </svg>
+          <div class="num"><b id="scoreNum">0</b><span>/ 100</span></div>
+        </div>
+        <div class="verdict">
+          <h2 id="verdict">Scoring…</h2>
+          <p id="verdictSub"></p>
+        </div>
+      </div>
+      <div class="cats" id="cats"></div>
+      <div id="kwBlock">
+        <h3>Job description keywords</h3>
+        <p class="note" id="kwSummary" style="margin:4px 0 10px"></p>
+        <div class="chips" id="kwChips"></div>
+      </div>
+      <div>
+        <h3>Fix these first</h3>
+        <ul class="fixes" id="fixes" style="margin-top:10px"></ul>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+/*SCORE-START*/
+const STOP = new Set(("a about above after again all also am an and any are as at be because been before being below between both but by can could did do does doing down during each few for from further had has have having he her here hers him his how i if in into is it its just me more most my no nor not now of off on once only or other our out over own same she should so some such than that the their them then there these they this those through to too under until up us very was we were what when where which while who whom why will with would you your yours").split(" "));
+const FILLER = new Set(("ability able across additional applicants apply benefits candidate candidates company culture degree description different drive duties employer environment equal excellent experience fast following full good great growing help including join looking make must need new opportunity paced part plus position preferred provide required requirements responsibilities responsible role seeking skills strong summary team teams time understanding using want ways well within work working years year you'll we're write build run against changes maintain complex senior junior communicate guide decisions familiarity knowledge concepts own own include includes lead product products").split(" "));
+const VERBS = new Set(("achieved administered analyzed architected automated built championed collaborated completed configured consolidated coordinated created cut debugged delivered deployed designed developed directed drove eliminated enabled engineered established evaluated executed expanded extracted generated grew identified implemented improved increased initiated integrated introduced launched led managed mentored migrated modeled monitored negotiated optimized orchestrated organized owned partnered piloted planned presented produced reduced refactored released replaced researched resolved restructured reviewed scaled secured shipped simplified solved spearheaded standardized streamlined supported tested trained transformed tracked upgraded validated wrote").split(" "));
+
+function stem(w) {
+  w = w.toLowerCase();
+  if (w.length > 5) w = w.replace(/(ing|ed|es|s)$/, "");
+  else if (w.length > 3) w = w.replace(/s$/, "");
+  return w;
+}
+function tokens(text) {
+  return (text.toLowerCase().match(/[a-z0-9][a-z0-9+#.\/-]*/g) || []).map(t => t.replace(/[.\/-]+$/, "")).filter(Boolean);
+}
+function jdKeywords(jd) {
+  const toks = tokens(jd);
+  const freq = new Map(), first = new Map();
+  const bump = (k, i) => { freq.set(k, (freq.get(k) || 0) + 1); if (!first.has(k)) first.set(k, i); };
+  toks.forEach((t, i) => {
+    if (t.length < 2 || STOP.has(t) || FILLER.has(t) || /^\d+$/.test(t)) return;
+    bump(t, i);
+  });
+  for (let i = 0; i < toks.length - 1; i++) {
+    const a = toks[i], b = toks[i + 1];
+    if (STOP.has(a) || STOP.has(b) || FILLER.has(a) || FILLER.has(b) || a.length < 2 || b.length < 2) continue;
+    bump(a + " " + b, i);
+  }
+  let terms = [...freq.entries()].filter(([k, n]) => k.includes(" ") ? n >= 2 : true);
+  // drop unigrams already covered by a frequent bigram of equal count
+  const bigrams = terms.filter(([k]) => k.includes(" "));
+  terms = terms.filter(([k, n]) => k.includes(" ") || !bigrams.some(([g, m]) => m >= n && g.split(" ").includes(k) && m === n));
+  terms.sort((x, y) => (y[1] * (y[0].includes(" ") ? 1.5 : 1)) - (x[1] * (x[0].includes(" ") ? 1.5 : 1)) || first.get(x[0]) - first.get(y[0]));
+  return terms.slice(0, 24).map(([k]) => k);
+}
+function has(resumeStems, resumeJoined, term) {
+  const parts = term.split(" ").map(stem);
+  if (parts.length === 1) return resumeStems.has(parts[0]);
+  return resumeJoined.includes(" " + parts.join(" ") + " ");
+}
+function lvl(p) { return p >= 0.8 ? "good" : p >= 0.55 ? "warn" : "bad"; }
+
+function scoreResume(resume, jd) {
+  const text = resume.trim();
+  const lines = text.split(/\r?\n/).map(l => l.trim());
+  const words = tokens(text);
+  const wc = words.length;
+  const cats = [], fixes = [];
+
+  // 1. Keywords
+  let kw = null;
+  if (jd && jd.trim().length > 40) {
+    const terms = jdKeywords(jd);
+    const st = words.map(stem);
+    const set = new Set(st), joined = " " + st.join(" ") + " ";
+    const hit = terms.filter(t => has(set, joined, t)), miss = terms.filter(t => !has(set, joined, t));
+    const p = terms.length ? hit.length / terms.length : 0;
+    kw = { hit, miss, total: terms.length };
+    cats.push({ key: "Keyword match", weight: 35, pts: p * 35, detail: `${hit.length} of ${terms.length} job description terms appear in your resume.` });
+    if (miss.length) fixes.push({ gain: Math.round((1 - p) * 35 * 0.6), text: `Work in the missing terms where they are true for you: ${miss.slice(0, 6).join(", ")}. Put them in your skills list and in the bullets that show them.` });
+  }
+
+  // 2. Sections
+  const head = (re) => lines.some(l => l.length > 0 && l.length < 45 && re.test(l.replace(/[:\-–—_=*#]/g, "").trim()));
+  const secs = [
+    ["Experience", /^(work |professional |relevant )?(experience|employment( history)?|work history)$/i, 4],
+    ["Education", /^(education|academic background|education and training)$/i, 3],
+    ["Skills", /^(technical |key |core )?(skills|technologies|competencies)( summary)?$/i, 4],
+    ["Summary", /^(professional |career )?(summary|profile|objective|about me)$/i, 2],
+    ["Projects or certifications", /^(projects|certifications?|achievements|awards|publications)$/i, 2]
+  ];
+  let sp = 0; const missingSecs = [];
+  secs.forEach(([n, re, w]) => { if (head(re)) sp += w; else missingSecs.push([n, w]); });
+  cats.push({ key: "Standard sections", weight: 15, pts: sp / 15 * 15, detail: missingSecs.length ? `Not found: ${missingSecs.map(m => m[0]).join(", ")}.` : "All standard headings found." });
+  missingSecs.filter(m => m[1] >= 3).forEach(([n, w]) => fixes.push({ gain: w, text: `Add a plain "${n}" heading. ATS parsers look for these exact section names; creative titles can hide your content.` }));
+
+  // 3. Contact
+  const email = /[\w.+-]+@[\w-]+\.[\w.-]+/.test(text);
+  const phone = /(\+?\d[\d\s().-]{8,}\d)/.test(text);
+  const link = /(linkedin\.com|github\.com|portfolio|behance\.net)/i.test(text);
+  const cp = (email ? 4 : 0) + (phone ? 4 : 0) + (link ? 2 : 0);
+  cats.push({ key: "Contact details", weight: 10, pts: cp, detail: `Email ${email ? "found" : "missing"}, phone ${phone ? "found" : "missing"}, profile link ${link ? "found" : "missing"}.` });
+  if (!email) fixes.push({ gain: 4, text: "Add an email address as plain text near the top of the page." });
+  if (!phone) fixes.push({ gain: 4, text: "Add a phone number as plain text near the top of the page." });
+  if (!link) fixes.push({ gain: 2, text: "Add a LinkedIn or portfolio URL." });
+
+  // 4. Parseability
+  let fp = 15; const issues = [];
+  const pipes = lines.filter(l => (l.match(/\|/g) || []).length >= 2 || /\t/.test(l)).length;
+  if (pipes > 3) { fp -= 4; issues.push("table-like columns"); }
+  const odd = (text.match(/[^\x00-\x7F•–—‘’“”·●▪■✓]/g) || []).length;
+  if (odd > 8) { fp -= 3; issues.push("unusual symbols"); }
+  const long = lines.filter(l => l.length > 260).length;
+  if (long > 2) { fp -= 3; issues.push("very long unbroken lines"); }
+  const caps = lines.filter(l => l.length > 30 && l === l.toUpperCase() && /[A-Z]/.test(l)).length;
+  if (caps > 3) { fp -= 2; issues.push("long all-caps lines"); }
+  const dates = (text.match(/\b(19|20)\d{2}\b/g) || []).length;
+  if (dates < 2) { fp -= 3; issues.push("few dates"); }
+  const bulletLines = lines.filter(l => /^[-•*▪●–·]\s+\S/.test(l));
+  if (bulletLines.length < 3) { fp -= 3; issues.push("little bullet structure"); }
+  fp = Math.max(0, fp);
+  cats.push({ key: "Parseable formatting", weight: 15, pts: fp, detail: issues.length ? `Watch: ${issues.join(", ")}.` : "No layout traps detected." });
+  if (pipes > 3) fixes.push({ gain: 4, text: "Replace columns, tables and pipe-separated rows with single-column text. Many ATS tools read tables out of order." });
+  if (odd > 8) fixes.push({ gain: 3, text: "Swap decorative symbols and icons for plain text and standard bullets." });
+  if (dates < 2) fixes.push({ gain: 3, text: "Show a start and end year for each role and degree." });
+  if (bulletLines.length < 3) fixes.push({ gain: 3, text: "Write achievements as bullet lines starting with “- ” or “•”." });
+
+  // 5. Impact
+  let verbRatio = 0, metricRatio = 0;
+  if (bulletLines.length) {
+    const b = bulletLines.map(l => l.replace(/^[-•*▪●–·]\s+/, ""));
+    verbRatio = b.filter(l => VERBS.has((l.split(/\s+/)[0] || "").toLowerCase())).length / b.length;
+    metricRatio = b.filter(l => /\d|%|\$/.test(l)).length / b.length;
+  }
+  const ip = Math.min(1, verbRatio / 0.7) * 7.5 + Math.min(1, metricRatio / 0.45) * 7.5;
+  cats.push({ key: "Impact and action verbs", weight: 15, pts: ip, detail: bulletLines.length ? `${Math.round(verbRatio * 100)}% of bullets open with an action verb; ${Math.round(metricRatio * 100)}% include a number.` : "No bullet lines found to evaluate." });
+  if (verbRatio < 0.7) fixes.push({ gain: Math.round((1 - Math.min(1, verbRatio / 0.7)) * 7.5), text: "Start each bullet with a strong verb such as Built, Reduced, Led or Automated." });
+  if (metricRatio < 0.45) fixes.push({ gain: Math.round((1 - Math.min(1, metricRatio / 0.45)) * 7.5), text: "Add numbers to more bullets: percentages, money, team size, volume or time saved." });
+
+  // 6. Length
+  let lp;
+  if (wc >= 400 && wc <= 850) lp = 1; else if (wc >= 280 && wc < 400) lp = 0.7; else if (wc > 850 && wc <= 1100) lp = 0.7; else lp = Math.max(0, Math.min(wc, 1500 - wc) / 280 * 0.7);
+  cats.push({ key: "Length", weight: 10, pts: lp * 10, detail: `${wc} words. A one to two page resume runs about 400 to 850.` });
+  if (lp < 1) fixes.push({ gain: Math.round((1 - lp) * 10), text: wc < 400 ? "Add detail to your recent roles. The resume is short for an ATS to find enough context." : "Trim older or minor roles. Aim for two pages at most." });
+
+  const maxW = cats.reduce((s, c) => s + c.weight, 0);
+  const total = Math.round(cats.reduce((s, c) => s + c.pts, 0) / maxW * 100);
+  fixes.sort((a, b) => b.gain - a.gain);
+  return { total, cats, kw, fixes: fixes.filter(f => f.gain >= 1).slice(0, 6), wc, hasJd: !!kw };
+}
+/*SCORE-END*/
+
+const SAMPLE_RESUME = `Priya Nair
+Pune, Maharashtra | priya.nair@example.com | +91 98765 43210
+linkedin.com/in/priya-nair-example
+
+SUMMARY
+Data analyst with 4 years of experience turning messy operational data into dashboards and decisions for retail and logistics teams.
+
+EXPERIENCE
+Data Analyst, Horizon Retail Pvt Ltd
+Jun 2022 - Present
+- Built weekly sales dashboards in Power BI used by 40+ store managers, cutting manual reporting time by 12 hours a week
+- Wrote SQL queries over 25M-row tables to find stock-out patterns, reducing lost sales by 8%
+- Automated data cleaning with Python and pandas, saving 6 hours per reporting cycle
+- Partnered with merchandising to design A/B tests on promotions that lifted conversion by 3.5%
+
+Junior Analyst, Metro Logistics
+Jul 2020 - May 2022
+- Tracked delivery KPIs for 120 routes and presented findings to operations leadership
+- Created Excel models forecasting monthly demand with 92% accuracy
+- Supported migration of reporting from spreadsheets to a central data warehouse
+
+EDUCATION
+B.Sc. Statistics, Savitribai Phule Pune University, 2020
+
+SKILLS
+SQL, Python, pandas, Power BI, Excel, A/B testing, data visualization, statistics, ETL`;
+
+const SAMPLE_JD = `Senior Data Analyst
+
+We are looking for a data analyst to own reporting and analysis for our commerce team. You will build dashboards in Tableau or Power BI, write SQL against our data warehouse, and run A/B testing on product changes.
+
+Responsibilities
+- Design and maintain dashboards and KPI reporting for stakeholders
+- Write complex SQL queries and automate data pipelines with Python
+- Run A/B testing and statistical analysis to guide product decisions
+- Communicate insights to stakeholders and leadership
+
+Requirements
+- 3+ years of experience in data analysis
+- Strong SQL and Python skills, including pandas
+- Experience with Tableau or Power BI and data visualization
+- Knowledge of statistics and experiment design
+- Familiarity with ETL and data warehouse concepts`;
+
+const $ = id => document.getElementById(id);
+const resumeEl = $("resume"), jdEl = $("jd");
+let isSample = true;
+
+function levelOf(p) { return lvl(p); }
+function render() {
+  const text = resumeEl.value;
+  if (text.trim().length < 20) {
+    $("scoreNum").textContent = "0"; $("ring").setAttribute("stroke-dasharray", "0 327");
+    $("verdict").textContent = "Paste a resume to begin";
+    $("verdictSub").textContent = "The score updates as you type.";
+    $("cats").replaceChildren(); $("kwBlock").hidden = true; $("fixes").replaceChildren();
+    return;
+  }
+  const r = scoreResume(text, jdEl.value);
+  $("scoreNum").textContent = r.total;
+  const L = levelOf(r.total / 100);
+  $("ring").setAttribute("stroke", `var(--${L})`);
+  $("ring").setAttribute("stroke-dasharray", `${(r.total / 100) * 326.7} 327`);
+  const label = r.total >= 80 ? "Strong ATS fit" : r.total >= 65 ? "Good, with gaps" : r.total >= 50 ? "Needs work" : "Likely to be filtered out";
+  $("verdict").textContent = label;
+  $("verdictSub").textContent = r.hasJd ? "Scored on keywords, structure, contact details, formatting, impact and length." : "No job description added, so keywords are not scored. Paste one for the full check.";
+
+  const cats = $("cats"); cats.replaceChildren();
+  r.cats.forEach(c => {
+    const p = c.pts / c.weight, d = document.createElement("div");
+    const head = document.createElement("div"); head.className = "cat-head";
+    const a = document.createElement("span"); a.textContent = c.key;
+    const b = document.createElement("span"); b.textContent = `${Math.round(c.pts)} / ${c.weight}`;
+    head.append(a, b);
+    const bar = document.createElement("div"); bar.className = "bar";
+    const i = document.createElement("i"); i.className = lvl(p); i.style.width = Math.round(p * 100) + "%"; bar.append(i);
+    const det = document.createElement("div"); det.className = "cat-detail"; det.textContent = c.detail;
+    d.append(head, bar, det); cats.append(d);
+  });
+
+  $("kwBlock").hidden = !r.kw;
+  if (r.kw) {
+    $("kwSummary").textContent = `${r.kw.hit.length} matched, ${r.kw.miss.length} missing. Only add terms you can truthfully claim.`;
+    const chips = $("kwChips"); chips.replaceChildren();
+    r.kw.miss.forEach(t => { const s = document.createElement("span"); s.className = "chip miss"; s.textContent = t; chips.append(s); });
+    r.kw.hit.forEach(t => { const s = document.createElement("span"); s.className = "chip hit"; s.textContent = t; chips.append(s); });
+  }
+
+  const fx = $("fixes"); fx.replaceChildren();
+  if (!r.fixes.length) { const li = document.createElement("li"); li.className = "empty"; li.textContent = "Nothing major to fix. Tailor keywords to each job you apply for."; fx.append(li); }
+  r.fixes.forEach(f => {
+    const li = document.createElement("li");
+    const g = document.createElement("span"); g.className = "gain"; g.textContent = `+${f.gain}`;
+    const t = document.createElement("span"); t.textContent = f.text;
+    li.append(g, t); fx.append(li);
+  });
+}
+let timer;
+function schedule() { clearTimeout(timer); timer = setTimeout(render, 120); }
+function markEdited() { if (isSample) { isSample = false; $("sampleTag").hidden = true; } schedule(); }
+resumeEl.addEventListener("input", markEdited);
+jdEl.addEventListener("input", markEdited);
+
+$("sample").addEventListener("click", () => { resumeEl.value = SAMPLE_RESUME; jdEl.value = SAMPLE_JD; isSample = true; $("sampleTag").hidden = false; render(); });
+$("clear").addEventListener("click", () => { resumeEl.value = ""; jdEl.value = ""; isSample = false; $("sampleTag").hidden = true; setNote(""); render(); });
+
+function setNote(msg, err) { const n = $("fileNote"); n.textContent = msg || "Uploads are read in your browser. If a PDF comes out empty or scrambled, that is also a warning sign for real ATS parsers."; n.className = "note" + (err ? " err" : ""); }
+
+$("file").addEventListener("change", async e => {
+  const f = e.target.files[0]; if (!f) return;
+  const name = f.name.toLowerCase();
+  try {
+    let out = "";
+    if (name.endsWith(".txt") || name.endsWith(".md")) out = await f.text();
+    else if (name.endsWith(".docx")) {
+      if (typeof mammoth === "undefined") throw new Error("The DOCX reader did not load.");
+      out = (await mammoth.extractRawText({ arrayBuffer: await f.arrayBuffer() })).value;
+    } else if (name.endsWith(".pdf")) {
+      if (typeof pdfjsLib === "undefined") throw new Error("The PDF reader did not load.");
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(await f.arrayBuffer()) }).promise;
+      for (let p = 1; p <= pdf.numPages; p++) {
+        const content = await (await pdf.getPage(p)).getTextContent();
+        let line = "", y = null;
+        content.items.forEach(it => { const ny = it.transform[5]; if (y !== null && Math.abs(ny - y) > 3) { out += line.trim() + "\n"; line = ""; } line += it.str + " "; y = ny; });
+        out += line.trim() + "\n";
+      }
+    } else throw new Error("Use a PDF, DOCX or TXT file.");
+    if (out.trim().length < 20) throw new Error("No readable text found in that file. Paste the text instead.");
+    resumeEl.value = out; isSample = false; $("sampleTag").hidden = true; setNote(`Loaded ${f.name}. Check the text below reads in the right order.`); render();
+  } catch (err) {
+    setNote((err && err.message ? err.message : "Could not read that file.") + " You can paste the text instead.", true);
+  }
+  e.target.value = "";
+});
+
+resumeEl.value = SAMPLE_RESUME; jdEl.value = SAMPLE_JD; render();
+</script>
+
+</body></html>
