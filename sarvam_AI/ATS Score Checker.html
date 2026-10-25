@@ -68,12 +68,21 @@ button, .file-btn {
   font: 500 13px var(--font-body); color: var(--ink); background: var(--surface);
   border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; cursor: pointer;
 }
+button:disabled, .file-btn[aria-disabled="true"] { opacity: 0.65; cursor: not-allowed; }
 button:hover, .file-btn:hover { border-color: var(--accent); }
 .file-btn input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .file-btn { position: relative; display: inline-flex; }
 .note { font-size: 12.5px; color: var(--muted); margin: 0; }
 .note.err { color: var(--bad); }
+.note.ok { color: var(--good); }
+.note.warn { color: var(--warn); }
 .sample-tag { font-family: var(--font-mono); font-size: 11px; color: var(--warn); background: var(--warn-bg); padding: 2px 8px; border-radius: 99px; }
+.field { width: 100%; min-height: 38px; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-family: var(--font-body); font-size: 14px; }
+.field-inline { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 640px) { .field-inline { grid-template-columns: minmax(0, 1fr); } }
+.cfg { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: var(--bg); display: grid; gap: 10px; }
+.cfg summary { cursor: pointer; font-family: var(--font-mono); font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; }
+.stack { display: grid; gap: 8px; }
 
 .score-top { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 18px; align-items: center; }
 .gauge { position: relative; width: 132px; height: 132px; }
@@ -113,7 +122,7 @@ h3 { font-family: var(--font-display); font-size: 1.05rem; margin: 0; }
 <div class="wrap">
   <header>
     <h1>ATS Score Checker</h1>
-    <p>Paste your resume and the job description. You get a score out of 100, the keywords you are missing, and the fixes that earn the most points. Everything runs in your browser; nothing is uploaded.</p>
+    <p>Paste your resume and the job description. You get a score out of 100, missing keywords, and actionable fixes. By default everything runs in your browser; optional remote OCR can be configured for PDFs.</p>
   </header>
 
   <div class="panes">
@@ -127,10 +136,41 @@ h3 { font-family: var(--font-display); font-size: 1.05rem; margin: 0; }
         <label class="file-btn" for="file" style="text-transform:none;letter-spacing:0;font-family:var(--font-body);font-size:13px;color:var(--ink)">
           <input type="file" id="file" accept=".txt,.md,.docx,.pdf">Upload PDF, DOCX or TXT
         </label>
+        <button type="button" id="analyze" disabled>Analyze uploaded CV</button>
         <button type="button" id="clear">Clear both</button>
         <button type="button" id="sample">Load sample</button>
       </div>
-      <p class="note" id="fileNote">Uploads are read in your browser. If a PDF comes out empty or scrambled, that is also a warning sign for real ATS parsers.</p>
+      <p class="note" id="fileName" aria-live="polite">No file selected.</p>
+      <p class="note" id="statusMsg" role="status" aria-live="polite"></p>
+      <p class="note" id="fileNote">Uploads are read in your browser by default. Remote OCR is optional and configurable below.</p>
+
+      <div class="field-inline">
+        <div>
+          <label for="role">Target role</label>
+          <input class="field" id="role" type="text" autocomplete="organization-title" placeholder="e.g., Senior Data Analyst">
+        </div>
+        <div>
+          <label for="company">Target company</label>
+          <input class="field" id="company" type="text" autocomplete="organization" placeholder="e.g., Example Corp">
+        </div>
+      </div>
+
+      <details class="cfg" id="ocrConfigBox">
+        <summary>Remote OCR (optional)</summary>
+        <div class="stack">
+          <label><input id="remoteOcrEnabled" type="checkbox"> Enable remote OCR for PDF files</label>
+          <div>
+            <label for="ocrBaseUrl">OCR API base URL</label>
+            <input class="field" id="ocrBaseUrl" type="url" inputmode="url" placeholder="http://localhost:4000">
+          </div>
+          <div>
+            <label for="ocrEndpoint">OCR endpoint path</label>
+            <input class="field" id="ocrEndpoint" type="text" placeholder="/api/ocr/extract-text">
+          </div>
+          <p class="note">Only URL/path is configured here. Do not put private API keys in this page. Use your backend/proxy for secrets.</p>
+        </div>
+      </details>
+      <p class="note">Privacy: if remote OCR is enabled, PDF files are sent to your configured endpoint. If disabled or failing, extraction remains in-browser.</p>
 
       <label for="jd">Job description <span style="text-transform:none;letter-spacing:0">(optional, adds keyword matching)</span></label>
       <textarea id="jd" spellcheck="false"></textarea>
@@ -217,7 +257,7 @@ function scoreResume(resume, jd) {
 
   // 1. Keywords
   let kw = null;
-  if (jd && jd.trim().length > 40) {
+  if (jd && jd.trim().length >= 20) {
     const terms = jdKeywords(jd);
     const st = words.map(stem);
     const set = new Set(st), joined = " " + st.join(" ") + " ";
@@ -239,7 +279,7 @@ function scoreResume(resume, jd) {
   ];
   let sp = 0; const missingSecs = [];
   secs.forEach(([n, re, w]) => { if (head(re)) sp += w; else missingSecs.push([n, w]); });
-  cats.push({ key: "Standard sections", weight: 15, pts: sp / 15 * 15, detail: missingSecs.length ? `Not found: ${missingSecs.map(m => m[0]).join(", ")}.` : "All standard headings found." });
+  cats.push({ key: "Standard sections", weight: 15, pts: sp, detail: missingSecs.length ? `Not found: ${missingSecs.map(m => m[0]).join(", ")}.` : "All standard headings found." });
   missingSecs.filter(m => m[1] >= 3).forEach(([n, w]) => fixes.push({ gain: w, text: `Add a plain "${n}" heading. ATS parsers look for these exact section names; creative titles can hide your content.` }));
 
   // 3. Contact
@@ -264,7 +304,7 @@ function scoreResume(resume, jd) {
   if (caps > 3) { fp -= 2; issues.push("long all-caps lines"); }
   const dates = (text.match(/\b(19|20)\d{2}\b/g) || []).length;
   if (dates < 2) { fp -= 3; issues.push("few dates"); }
-  const bulletLines = lines.filter(l => /^[-•*▪●–·]\s+\S/.test(l));
+  const bulletLines = lines.filter(l => /^[-•*▪●–·]\s*\S/.test(l));
   if (bulletLines.length < 3) { fp -= 3; issues.push("little bullet structure"); }
   fp = Math.max(0, fp);
   cats.push({ key: "Parseable formatting", weight: 15, pts: fp, detail: issues.length ? `Watch: ${issues.join(", ")}.` : "No layout traps detected." });
@@ -292,7 +332,7 @@ function scoreResume(resume, jd) {
   if (lp < 1) fixes.push({ gain: Math.round((1 - lp) * 10), text: wc < 400 ? "Add detail to your recent roles. The resume is short for an ATS to find enough context." : "Trim older or minor roles. Aim for two pages at most." });
 
   const maxW = cats.reduce((s, c) => s + c.weight, 0);
-  const total = Math.round(cats.reduce((s, c) => s + c.pts, 0) / maxW * 100);
+  const total = Math.max(0, Math.min(100, Math.round(cats.reduce((s, c) => s + c.pts, 0) / maxW * 100)));
   fixes.sort((a, b) => b.gain - a.gain);
   return { total, cats, kw, fixes: fixes.filter(f => f.gain >= 1).slice(0, 6), wc, hasJd: !!kw };
 }
@@ -343,27 +383,44 @@ Requirements
 - Familiarity with ETL and data warehouse concepts`;
 
 const $ = id => document.getElementById(id);
-const resumeEl = $("resume"), jdEl = $("jd");
-let isSample = true;
+const resumeEl = $("resume"), jdEl = $("jd"), roleEl = $("role"), companyEl = $("company");
+const fileEl = $("file"), analyzeBtn = $("analyze"), remoteEnabledEl = $("remoteOcrEnabled");
+const ocrBaseEl = $("ocrBaseUrl"), ocrEndpointEl = $("ocrEndpoint"), fileBtnLabel = document.querySelector('label[for="file"]');
+const MIN_TEXT_CHARS = 20;
+const DEFAULT_OCR_ENDPOINT = "/api/ocr/extract-text";
+const DEFAULT_NOTE = "Uploads are read in your browser by default. Remote OCR is optional and configurable below.";
+let isSample = true, selectedFile = null, isAnalyzing = false;
 
 function levelOf(p) { return lvl(p); }
+function getTargetLabel() {
+  const role = roleEl.value.trim(), company = companyEl.value.trim();
+  if (role && company) return `${role} at ${company}`;
+  return role || company || "";
+}
+function jdForScoring() {
+  const target = getTargetLabel();
+  const jd = jdEl.value.trim();
+  return target ? `${target}\n${jd}`.trim() : jd;
+}
 function render() {
   const text = resumeEl.value;
-  if (text.trim().length < 20) {
+  if (text.trim().length < MIN_TEXT_CHARS) {
     $("scoreNum").textContent = "0"; $("ring").setAttribute("stroke-dasharray", "0 327");
     $("verdict").textContent = "Paste a resume to begin";
     $("verdictSub").textContent = "The score updates as you type.";
     $("cats").replaceChildren(); $("kwBlock").hidden = true; $("fixes").replaceChildren();
     return;
   }
-  const r = scoreResume(text, jdEl.value);
+  const r = scoreResume(text, jdForScoring());
   $("scoreNum").textContent = r.total;
   const L = levelOf(r.total / 100);
   $("ring").setAttribute("stroke", `var(--${L})`);
   $("ring").setAttribute("stroke-dasharray", `${(r.total / 100) * 326.7} 327`);
   const label = r.total >= 80 ? "Strong ATS fit" : r.total >= 65 ? "Good, with gaps" : r.total >= 50 ? "Needs work" : "Likely to be filtered out";
   $("verdict").textContent = label;
-  $("verdictSub").textContent = r.hasJd ? "Scored on keywords, structure, contact details, formatting, impact and length." : "No job description added, so keywords are not scored. Paste one for the full check.";
+  const target = getTargetLabel();
+  const scope = target ? ` Target role: ${target}.` : "";
+  $("verdictSub").textContent = r.hasJd ? `Scored on keywords, structure, contact details, formatting, impact and length.${scope}` : `No job description added, so keywords are not scored. Paste one for the full check.${scope}`;
 
   const cats = $("cats"); cats.replaceChildren();
   r.cats.forEach(c => {
@@ -398,43 +455,198 @@ function render() {
 let timer;
 function schedule() { clearTimeout(timer); timer = setTimeout(render, 120); }
 function markEdited() { if (isSample) { isSample = false; $("sampleTag").hidden = true; } schedule(); }
-resumeEl.addEventListener("input", markEdited);
-jdEl.addEventListener("input", markEdited);
-
-$("sample").addEventListener("click", () => { resumeEl.value = SAMPLE_RESUME; jdEl.value = SAMPLE_JD; isSample = true; $("sampleTag").hidden = false; render(); });
-$("clear").addEventListener("click", () => { resumeEl.value = ""; jdEl.value = ""; isSample = false; $("sampleTag").hidden = true; setNote(""); render(); });
-
-function setNote(msg, err) { const n = $("fileNote"); n.textContent = msg || "Uploads are read in your browser. If a PDF comes out empty or scrambled, that is also a warning sign for real ATS parsers."; n.className = "note" + (err ? " err" : ""); }
-
-$("file").addEventListener("change", async e => {
-  const f = e.target.files[0]; if (!f) return;
-  const name = f.name.toLowerCase();
+function setStatus(msg, tone) { const n = $("statusMsg"); n.textContent = msg || ""; n.className = "note" + (tone ? ` ${tone}` : ""); }
+function setNote(msg, tone) { const n = $("fileNote"); n.textContent = msg || DEFAULT_NOTE; n.className = "note" + (tone ? ` ${tone}` : ""); }
+function setFileLabel(msg) { $("fileName").textContent = msg || "No file selected."; }
+function setAnalyzing(active) {
+  isAnalyzing = active;
+  analyzeBtn.disabled = active || !selectedFile;
+  fileEl.disabled = active;
+  if (fileBtnLabel) fileBtnLabel.setAttribute("aria-disabled", active ? "true" : "false");
+}
+function updateAnalyzeEnabled() { analyzeBtn.disabled = isAnalyzing || !selectedFile; }
+function buildOcrUrl(base, endpoint) {
+  const b = (base || "").trim();
+  const e = (endpoint || "").trim();
+  if (!e) return "";
+  if (/^https?:\/\//i.test(e)) return e;
+  if (!b) return "";
+  const baseNorm = b.endsWith("/") ? b.slice(0, -1) : b;
+  const endNorm = e.startsWith("/") ? e : `/${e}`;
+  return baseNorm + endNorm;
+}
+function saveOcrConfig() {
+  const config = {
+    enabled: remoteEnabledEl.checked,
+    baseUrl: ocrBaseEl.value.trim(),
+    endpoint: ocrEndpointEl.value.trim() || DEFAULT_OCR_ENDPOINT
+  };
+  try { localStorage.setItem("atsOcrConfig", JSON.stringify(config)); } catch (_) {}
+}
+function loadOcrConfig() {
+  let fromStorage = {};
+  try { fromStorage = JSON.parse(localStorage.getItem("atsOcrConfig") || "{}") || {}; } catch (_) {}
+  const params = new URLSearchParams(location.search);
+  const endpointFromQuery = params.get("ocrEndpoint");
+  const baseFromQuery = params.get("ocrBaseUrl");
+  const enabledFromQuery = params.get("remoteOcr");
+  ocrBaseEl.value = baseFromQuery || fromStorage.baseUrl || "";
+  ocrEndpointEl.value = endpointFromQuery || fromStorage.endpoint || DEFAULT_OCR_ENDPOINT;
+  remoteEnabledEl.checked = enabledFromQuery ? enabledFromQuery === "1" || enabledFromQuery === "true" : !!fromStorage.enabled;
+}
+function extractTextFromPayload(payload, depth = 0) {
+  if (depth > 5 || payload == null) return "";
+  if (typeof payload === "string") return payload.trim();
+  if (Array.isArray(payload)) {
+    const all = payload.map(v => extractTextFromPayload(v, depth + 1)).filter(Boolean).join("\n").trim();
+    return all;
+  }
+  if (typeof payload !== "object") return "";
+  const direct = ["text", "content", "extractedText", "extracted_text", "fullText", "full_text", "rawText", "raw_text"];
+  for (const key of direct) {
+    if (typeof payload[key] === "string" && payload[key].trim()) return payload[key].trim();
+  }
+  const containers = ["data", "result", "ocr", "document", "pages", "items", "results"];
+  for (const key of containers) {
+    const text = extractTextFromPayload(payload[key], depth + 1);
+    if (text) return text;
+  }
+  for (const value of Object.values(payload)) {
+    const text = extractTextFromPayload(value, depth + 1);
+    if (text) return text;
+  }
+  return "";
+}
+function currentRemoteConfig() {
+  const endpoint = ocrEndpointEl.value.trim() || DEFAULT_OCR_ENDPOINT;
+  return { enabled: remoteEnabledEl.checked, endpoint, url: buildOcrUrl(ocrBaseEl.value, endpoint) };
+}
+async function extractPdfViaRemoteOcr(file) {
+  const cfg = currentRemoteConfig();
+  if (!cfg.enabled) throw new Error("Remote OCR is disabled.");
+  if (!cfg.url) throw new Error("Remote OCR is enabled but API base URL/endpoint is missing.");
+  const formData = new FormData();
+  formData.append("file", file, file.name);
+  setStatus(`Uploading ${file.name} to OCR service…`, "warn");
+  const response = await fetch(cfg.url, { method: "POST", body: formData, headers: { "Accept": "application/json, text/plain" } });
+  const bodyText = await response.text();
+  if (!response.ok) throw new Error(`OCR API request failed (${response.status}).`);
+  const contentType = (response.headers.get("content-type") || "").toLowerCase();
+  let payload = bodyText;
+  if (contentType.includes("json")) {
+    try { payload = bodyText ? JSON.parse(bodyText) : {}; } catch (_) { throw new Error("OCR API returned invalid JSON."); }
+  } else {
+    try { payload = JSON.parse(bodyText); } catch (_) {}
+  }
+  const extracted = extractTextFromPayload(payload);
+  if (extracted.length < MIN_TEXT_CHARS) throw new Error("OCR API returned empty or unreadable text.");
+  return extracted;
+}
+async function extractPdfLocally(file) {
+  if (typeof pdfjsLib === "undefined") throw new Error("The PDF reader did not load.");
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  let out = "";
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const content = await (await pdf.getPage(p)).getTextContent();
+    let line = "", y = null;
+    content.items.forEach(it => { const ny = it.transform[5]; if (y !== null && Math.abs(ny - y) > 3) { out += line.trim() + "\n"; line = ""; } line += it.str + " "; y = ny; });
+    out += line.trim() + "\n";
+  }
+  return out;
+}
+async function extractFileLocally(file) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".txt") || name.endsWith(".md")) return file.text();
+  if (name.endsWith(".docx")) {
+    if (typeof mammoth === "undefined") throw new Error("The DOCX reader did not load.");
+    return (await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() })).value;
+  }
+  if (name.endsWith(".pdf")) return extractPdfLocally(file);
+  throw new Error("Use a PDF, DOCX or TXT file.");
+}
+async function analyzeSelectedFile() {
+  if (!selectedFile || isAnalyzing) return;
+  setAnalyzing(true);
+  setStatus("Analyzing resume…");
+  const file = selectedFile;
+  const lowerName = file.name.toLowerCase();
+  let source = "local";
   try {
     let out = "";
-    if (name.endsWith(".txt") || name.endsWith(".md")) out = await f.text();
-    else if (name.endsWith(".docx")) {
-      if (typeof mammoth === "undefined") throw new Error("The DOCX reader did not load.");
-      out = (await mammoth.extractRawText({ arrayBuffer: await f.arrayBuffer() })).value;
-    } else if (name.endsWith(".pdf")) {
-      if (typeof pdfjsLib === "undefined") throw new Error("The PDF reader did not load.");
-      pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(await f.arrayBuffer()) }).promise;
-      for (let p = 1; p <= pdf.numPages; p++) {
-        const content = await (await pdf.getPage(p)).getTextContent();
-        let line = "", y = null;
-        content.items.forEach(it => { const ny = it.transform[5]; if (y !== null && Math.abs(ny - y) > 3) { out += line.trim() + "\n"; line = ""; } line += it.str + " "; y = ny; });
-        out += line.trim() + "\n";
+    if (lowerName.endsWith(".pdf") && remoteEnabledEl.checked) {
+      try {
+        out = await extractPdfViaRemoteOcr(file);
+        source = "remote";
+      } catch (remoteErr) {
+        setStatus(`Remote OCR unavailable: ${remoteErr.message} Falling back to browser extraction.`, "warn");
+        out = await extractPdfLocally(file);
+        source = "local-fallback";
       }
-    } else throw new Error("Use a PDF, DOCX or TXT file.");
-    if (out.trim().length < 20) throw new Error("No readable text found in that file. Paste the text instead.");
-    resumeEl.value = out; isSample = false; $("sampleTag").hidden = true; setNote(`Loaded ${f.name}. Check the text below reads in the right order.`); render();
+    } else {
+      out = await extractFileLocally(file);
+    }
+    if (out.trim().length < MIN_TEXT_CHARS) throw new Error("No readable text found in that file. Paste the text instead.");
+    resumeEl.value = out;
+    isSample = false;
+    $("sampleTag").hidden = true;
+    const sourceMsg = source === "remote" ? "remote OCR." : source === "local-fallback" ? "browser fallback after remote OCR failed." : "browser extraction.";
+    setStatus(`Loaded ${file.name} using ${sourceMsg}`, source === "local-fallback" ? "warn" : "ok");
+    setNote(`Loaded ${file.name}. Check the extracted text for order/accuracy before applying.`, "ok");
+    render();
   } catch (err) {
-    setNote((err && err.message ? err.message : "Could not read that file.") + " You can paste the text instead.", true);
+    setStatus((err && err.message ? err.message : "Could not process that file.") + " You can still paste resume text manually.", "err");
+    setNote(DEFAULT_NOTE, "");
+  } finally {
+    selectedFile = null;
+    fileEl.value = "";
+    setFileLabel("No file selected.");
+    setAnalyzing(false);
+    updateAnalyzeEnabled();
   }
-  e.target.value = "";
+}
+
+resumeEl.addEventListener("input", markEdited);
+jdEl.addEventListener("input", markEdited);
+roleEl.addEventListener("input", schedule);
+companyEl.addEventListener("input", schedule);
+
+$("sample").addEventListener("click", () => {
+  resumeEl.value = SAMPLE_RESUME; jdEl.value = SAMPLE_JD; isSample = true; $("sampleTag").hidden = false;
+  setStatus(""); setNote(DEFAULT_NOTE); render();
+});
+$("clear").addEventListener("click", () => {
+  resumeEl.value = ""; jdEl.value = ""; isSample = false; $("sampleTag").hidden = true;
+  setStatus(""); setNote(DEFAULT_NOTE); render();
 });
 
-resumeEl.value = SAMPLE_RESUME; jdEl.value = SAMPLE_JD; render();
+fileEl.addEventListener("change", e => {
+  selectedFile = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+  if (!selectedFile) {
+    setFileLabel("No file selected.");
+    setStatus("Select a PDF, DOCX, or TXT file to analyze.", "warn");
+  } else {
+    setFileLabel(`Selected file: ${selectedFile.name}`);
+    setStatus("File selected. Click “Analyze uploaded CV” to extract text and score it.");
+  }
+  updateAnalyzeEnabled();
+});
+analyzeBtn.addEventListener("click", analyzeSelectedFile);
+remoteEnabledEl.addEventListener("change", () => {
+  saveOcrConfig();
+  const cfg = currentRemoteConfig();
+  if (!cfg.enabled) setStatus("Remote OCR disabled. PDFs will be processed in your browser.");
+  else if (!cfg.url) setStatus("Remote OCR enabled. Add both API base URL and endpoint.", "warn");
+  else setStatus(`Remote OCR enabled: ${cfg.url}`);
+});
+[ocrBaseEl, ocrEndpointEl].forEach(el => el.addEventListener("input", () => { saveOcrConfig(); }));
+
+loadOcrConfig();
+resumeEl.value = SAMPLE_RESUME;
+jdEl.value = SAMPLE_JD;
+setFileLabel("No file selected.");
+setNote(DEFAULT_NOTE);
+render();
 </script>
 
 </body></html>
